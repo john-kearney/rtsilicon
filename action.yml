@@ -1,0 +1,95 @@
+name: "rtsilicon security attestation"
+description: "Scan RTL for hardware security defects (CWE-1194) and emit a security attestation. The `make secure` layer for open-source silicon."
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  target:
+    description: "Directory containing RTL/Chisel source to scan"
+    required: false
+    default: "."
+  design-name:
+    description: "Name for the design (used in attestation). Defaults to repo name."
+    required: false
+    default: ""
+  fail-on-candidates:
+    description: "If true, the action fails (exit 1) when scanner candidates are found."
+    required: false
+    default: "false"
+  output:
+    description: "Path to write the attestation JSON. Defaults to attestation.json."
+    required: false
+    default: "attestation.json"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install rtsilicon
+      shell: bash
+      run: |
+        python3 -m pip install --user pipx
+        python3 -m pipx ensurepath
+        pipx install git+https://github.com/PLACEHOLDER/rtsilicon.git
+        # Fallback: install from PyPI when published
+        # pipx install rtsilicon
+
+    - name: Run security attestation
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        DESIGN_NAME: ${{ inputs.design-name }}
+        FAIL_ON_CANDIDATES: ${{ inputs.fail-on-candidates }}
+        OUTPUT: ${{ inputs.output }}
+      run: |
+        echo "::group::rtsilicon security scan"
+        ARGS="--target $TARGET --output $OUTPUT"
+        if [ -n "$DESIGN_NAME" ]; then
+          ARGS="$ARGS --name $DESIGN_NAME"
+        fi
+        if [ "$FAIL_ON_CANDIDATES" = "true" ]; then
+          ARGS="$ARGS --ci"
+        fi
+        rt-si attest $ARGS
+        echo "::endgroup::"
+
+    - name: Upload attestation artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: rtsilicon-attestation
+        path: ${{ inputs.output }}
+
+    - name: Comment attestation on PR (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const att = JSON.parse(fs.readFileSync('${{ inputs.output }}', 'utf8'));
+          const cweList = Object.entries(att.cwe_summary || {})
+            .map(([cwe, n]) => `\`${cwe}\` (${n})`)
+            .join(', ') || 'none';
+          const badge = att.total_candidates === 0
+            ? '🟢 **0 findings**'
+            : `🟡 **${att.total_candidates} candidates** (${cweList})`;
+          const body = [
+            `### rtsilicon security attestation`,
+            ``,
+            badge,
+            ``,
+            `> Scanner candidates are **hints**, not confirmed vulnerabilities.`,
+            `> Each requires human review before acting.`,
+            ``,
+            `- **Design:** \`${att.design_name}\``,
+            `- **Scanned:** ${att.scanned_at}`,
+            `- **Scanner:** rtsilicon v${att.scanner_version}`,
+            `- **RTL files scanned:** ${att.rtl_files_scanned}`,
+            `- **Integrity hash:** \`${att.integrity_hash.substring(0, 16)}\``,
+            ``,
+            `See [field guide](https://github.com/PLACEHOLDER/rtsilicon/tree/main/field-guide) for what each CWE class means and how to fix it.`,
+          ].join('\n');
+          github.rest.issues.createComment({
+            ...context.repo,
+            issue_number: context.issue.number,
+            body,
+          });

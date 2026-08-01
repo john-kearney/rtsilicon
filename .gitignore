@@ -1,0 +1,54 @@
+# PRIVATE — do not push
+silicon-audit/
+findings/
+pocs/
+dataset/VERIFIED-GROUND-TRUTH.jsonl
+dataset/*.jsonl
+registry/
+docs/DISCLOSURE-TEMPLATES.md
+docs/sha3-bug-report.md
+attestation.json
+
+# Phase 2 items (kept local, not in public repo yet)
+ctf/
+learn/
+docs/FUZZER-DESIGN.md
+docs/INFOFLOW-DESIGN.md
+docs/LLM-HARNESS-DESIGN.md
+docs/SNYK-UX-DESIGN.md
+docs/talk-abstracts.md
+TOOL-SCAFFOLD.md
+scripts/
+
+# Advanced layers (kept local, return as flags or separate repos)
+src/rtsilicon/fuzzer.py
+src/rtsilicon/infoflow.py
+src/rtsilicon/triage_llm.py
+src/rtsilicon/triage.py
+src/rtsilicon/tt_attest.py
+tests/test_fuzzer.py
+tests/test_infoflow.py
+tests/test_triage_llm.py
+tests/test_registry_validation.py
+tests/test_tt_attest.py
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Simulation artifacts
+*.vvp
+*.vcd
+obj_dir/
+
+# rtsilicon state
+.rtsilicon/
