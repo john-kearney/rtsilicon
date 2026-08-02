@@ -1,0 +1,20 @@
+# Example .pre-commit-config.yaml for rt-si
+# Add this to your repo to get automatic security checks on every commit:
+#
+#   cp .pre-commit-config.yaml .git/hooks/pre-commit-config.yaml
+#   pre-commit install
+#
+# Or add to your existing .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/john-kearney/rtsilicon
+#     rev: v0.3
+#     hooks:
+#       - id: rt-si-check
+#         args: ["--target", "src"]
+#
+repos:
+  - repo: https://github.com/john-kearney/rtsilicon
+    rev: v0.3
+    hooks:
+      - id: rt-si-check
+        args: ["--target", "."]

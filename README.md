@@ -72,6 +72,7 @@ python3 -m venv .venv
 
 ## CI integration
 
+### GitHub Actions
 Add to `.github/workflows/security.yml`:
 ```yaml
 uses: john-kearney/rtsilicon@v1
@@ -79,7 +80,17 @@ with:
   target: ./src
 ```
 
-Generates a badge: 🟢 `rtsilicon: 0 issues` or 🔴 `rtsilicon: 3 issues`
+### pre-commit hook
+Add to your `.pre-commit-config.yaml`:
+```yaml
+- repo: https://github.com/john-kearney/rtsilicon
+  rev: v0.3
+  hooks:
+    - id: rt-si-check
+      args: ["--target", "src"]
+```
+
+Runs on every commit. Catches security issues before they ship.
 
 ## Field guide
 
