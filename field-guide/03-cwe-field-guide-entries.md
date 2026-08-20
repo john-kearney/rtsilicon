@@ -430,3 +430,154 @@ only via intended inputs. For OSS projects: review PRs that add
 conditional logic.
 
 **MITRE reference:** https://cwe.mitre.org/data/definitions/1242.html
+
+---
+
+## CWE-362: Race Condition (non-blocking assignment override)
+
+**Plain language:** the same signal is assigned twice in the same clock
+cycle without the assignments being in mutually exclusive branches. The
+last assignment silently wins, and the first one is dead code. If the
+two assignments encode different intents (reset vs. data, two different
+conditions), one of them never happens.
+
+**Why it matters:** in simulation you may see the correct value (the
+last assignment is what settles), so tests pass. But the dead
+assignment masks a real intent bug: usually one condition was supposed
+to take priority, and the priority is inverted or one path is
+unreachable. In security logic this shows up as a reset or lock that
+appears to be implemented but never fires.
+
+**What it looks like in RTL:** two non-blocking assignments to the same
+signal inside one always block, with only plain `if` blocks between
+them (no `else` making the paths exclusive).
+
+### The pattern (vulnerable)
+
+```verilog
+always @(posedge clk) begin
+    if (lock_request)
+        lock_reg <= 1'b1;      // intent: set the lock
+    if (clear_all)
+        lock_reg <= 1'b0;      // intent: clear — silently overrides above
+endmodule
+```
+
+When both `lock_request` and `clear_all` are high, `lock_reg` gets 0.
+If the design intent was "lock wins," the code is wrong and no test
+caught it — both assignments "ran."
+
+### The pattern (correct — explicit priority)
+
+```verilog
+always @(posedge clk) begin
+    if (clear_all)
+        lock_reg <= 1'b0;      // clear has priority
+    else if (lock_request)
+        lock_reg <= 1'b1;      // lock only when not clearing
+end
+```
+
+**How to check:** `rt-si` flags signals assigned twice in one always
+block without a branch separator between the assignments (the CWE362
+rule). Manual review: for each hit, confirm the two assignment paths
+are genuinely mutually exclusive and the winning order matches intent.
+
+**MITRE reference:** https://cwe.mitre.org/data/definitions/362.html
+
+---
+
+## CWE-369: Divide By Zero
+
+**Plain language:** the design performs a division or modulo where the
+divisor can be zero. In hardware the result is undefined (each
+synthesis tool picks its own behavior), and in a CPU core it usually
+means a hang or a wrong result where the ISA defines an exact answer.
+
+**Why it matters:** on RISC-V cores the architecture specifies exact
+results for divide-by-zero (`DIV x/0 = -1`, `REM x/0 = x`). A divider
+that instead hangs the pipeline or returns garbage breaks software that
+relies on the spec — and an attacker who can drive a zero divisor has
+a denial-of-service primitive against the core.
+
+**What it looks like in RTL:** an iterative divider whose control FSM
+has no guard on the divisor before starting the shift-subtract loop.
+
+### The pattern (vulnerable)
+
+```verilog
+// iterative restoring divider, no zero check
+if (div_start) begin
+    state <= DIVIDE;      // enters 32-cycle loop regardless of divisor
+    quotient <= (others => '0');
+end
+```
+
+If `divisor == 0`, the subtraction loop never converges to a sensible
+quotient — or worse, the FSM stalls waiting for a borrow that behaves
+unexpectedly.
+
+### The pattern (correct)
+
+```verilog
+if (div_start) begin
+    if (divisor = ZERO) begin
+        quotient  <= signed ? NEG_ONE : UNSIGNED_MAX;  -- x/0 per spec
+        remainder <= dividend;                          -- x MOD 0 = x
+        state     <= DONE;
+    end else
+        state <= DIVIDE;
+end
+```
+
+**How to check:** `rt-si` flags division logic with no zero-divisor
+comparison anywhere in the file (the CWE369 rule). Manual review:
+trace the divisor input through the FSM and confirm the spec-defined
+result is produced.
+
+**MITRE reference:** https://cwe.mitre.org/data/definitions/369.html
+
+---
+
+## CWE-835: Loop with Unreachable Exit Condition (infinite loop)
+
+**Plain language:** in RTL terms, the class we flag is the copy-paste
+index error: a concatenation or assignment list that uses the same
+array index twice and skips another. The "loop" (your enumeration of
+elements) has a wrong exit state — one element never gets read, and
+another gets read twice.
+
+**Why it matters:** this is a silent data-corruption bug that produces
+wrong results with no error signal. The canonical case: secworks/sha3
+assembled its Keccak state with `block_reg[04]` twice and `block_reg[06]`
+never — the core computed wrong hashes, and because SHA-3 output looks
+random either way, only a known-answer test catches it.
+
+**What it looks like in RTL:** a hand-written concatenation or case
+enumeration where indices are copy-pasted.
+
+### The pattern (vulnerable)
+
+```verilog
+// Keccak state assembly — [04] duplicated, [06] missing
+assign state_in = {block_reg[03], block_reg[04], block_reg[04],
+                   block_reg[05], block_reg[07], ...};
+// Every hash this core produces is wrong. Simulation "works" (no X's),
+// the design synthesizes, and only a NIST test vector catches it.
+```
+
+### The pattern (correct)
+
+```verilog
+assign state_in = {block_reg[03], block_reg[04], block_reg[05],
+                   block_reg[06], block_reg[07], ...};
+// Sequential indices — generate the list or test against the spec.
+```
+
+**How to check:** `rt-si` flags duplicate array indices inside
+concatenations (the CWE835 rule — this exact check found the sha3
+bug). Manual review: for any hand-enumerated list, verify against the
+spec's element ordering, and always run known-answer test vectors
+before trusting a crypto core.
+
+**MITRE reference:** https://cwe.mitre.org/data/definitions/835.html

@@ -67,6 +67,9 @@ A plain-language field guide to the MITRE CWE hardware weakness classes
 | [CWE-1243](04-cwe-field-guide-entries.md#) | NV secrets not protected during debug | OpenTitan (how to do it right) |
 | [CWE-1318](04-cwe-field-guide-entries.md#) | Missing security in on-chip fabric | AXI-Lite AxPROT |
 | [CWE-1280](04-cwe-field-guide-entries.md#) | Access check after asset accessed | FastVDMA 4KBarrier confusion |
+| [CWE-362](03-cwe-field-guide-entries.md#) | NBA race — silent assignment override | verilog-ethernet population |
+| [CWE-369](03-cwe-field-guide-entries.md#) | Divide by zero (RISC-V spec result) | neorv32 iterative divider |
+| [CWE-835](03-cwe-field-guide-entries.md#) | Duplicate index in concatenation | secworks/sha3 wrong hashes |
 
 ## Authoritative sources (for when you want depth)
 
