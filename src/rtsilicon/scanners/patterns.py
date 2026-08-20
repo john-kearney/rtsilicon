@@ -437,7 +437,14 @@ _RANGE_GUARD_RE = re.compile(
 
 def _scan_dma_no_range_check(file: Path, text: str) -> list[ScanHit]:
     """D2-DMA-NO-IOMMU (weaker, file-level): DMA address present, no range guard
-    anywhere in the file. Lower signal — corroborates D2-dma-addr-from-csr."""
+    anywhere in the file. Lower signal — corroborates D2-dma-addr-from-csr.
+
+    Skips test/example infrastructure: testbench DMA masters with unguarded
+    addresses are simulation plumbing, not RTL (found on verilog-pcie,
+    where every test_* example file was flagged)."""
+    name = file.name.lower()
+    if name.startswith("test_") or file.suffix.lower() == ".py":
+        return []
     hits: list[ScanHit] = []
     if not _DMA_ADDR_RE.search(text):
         return hits
