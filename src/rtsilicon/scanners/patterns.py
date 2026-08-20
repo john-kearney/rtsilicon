@@ -141,7 +141,20 @@ def _scan_fsm_no_escalation(file: Path, text: str) -> list[ScanHit]:
 
 
 # A plain reg[N] counter that guards a security decision.
-_PLAIN_COUNTER_RE = re.compile(r"\breg\s*\[[^\]]+\]\s*\w*_?(ctr|counter|count|attempt|tries)")
+# Token-based, not substring (found on the secworks sweep): 'ctrl' must not
+# match 'ctr'. An identifier counts as a counter only if one of its
+# underscore-separated tokens is exactly one of these keywords.
+_COUNTER_TOKENS = {"ctr", "counter", "count", "cnt", "attempt", "tries"}
+
+_PLAIN_COUNTER_DECL_RE = re.compile(
+    r"\breg\b\s*\[[^\]]+\]\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)",
+    re.IGNORECASE,
+)
+
+
+def _is_counter_name(identifier: str) -> bool:
+    tokens = re.split(r"_+", identifier.lower())
+    return any(t in _COUNTER_TOKENS for t in tokens)
 
 
 def _scan_glitch_counter(file: Path, text: str) -> list[ScanHit]:
@@ -165,23 +178,29 @@ def _scan_glitch_counter(file: Path, text: str) -> list[ScanHit]:
         return []
     hits: list[ScanHit] = []
     for i, line in enumerate(text.splitlines(), start=1):
-        if _PLAIN_COUNTER_RE.search(line):
-            hits.append(
-                ScanHit(
-                    file=file,
-                    line=i,
-                    snippet=line.strip(),
-                    rule_id="B4-plain-counter",
-                    taxonomy_class=TaxonomyClass.GLITCH_SENSITIVE_COUNTER,
-                    initial_signal=15,
-                    note=(
-                        "Counter declared as plain reg. If it gates a security "
-                        "decision (lifecycle, attempt-limit, threshold), a single-bit "
-                        "glitch can bypass it. Confirm the counter's downstream effect "
-                        "before promoting."
-                    ),
-                )
+        code = line.split("//", 1)[0]
+        m = _PLAIN_COUNTER_DECL_RE.search(code)
+        if not m:
+            continue
+        names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+        if not any(_is_counter_name(n) for n in names):
+            continue
+        hits.append(
+            ScanHit(
+                file=file,
+                line=i,
+                snippet=line.strip(),
+                rule_id="B4-plain-counter",
+                taxonomy_class=TaxonomyClass.GLITCH_SENSITIVE_COUNTER,
+                initial_signal=15,
+                note=(
+                    "Counter declared as plain reg. If it gates a security "
+                    "decision (lifecycle, attempt-limit, threshold), a single-bit "
+                    "glitch can bypass it. Confirm the counter's downstream effect "
+                    "before promoting."
+                ),
             )
+        )
     return hits
 
 
@@ -539,13 +558,17 @@ _ZEROIZE_RE = re.compile(
 def _scan_secret_no_zeroize(file: Path, text: str) -> list[ScanHit]:
     """CWE-1239: secret-holding register with no clear-to-zero path."""
     hits: list[ScanHit] = []
-    # Find all secret register declarations
+    # Find all secret register declarations.
+    # Skip next-state (_new) and write-enable (_we) helpers: they are
+    # recomputed every cycle, not persistent state, so zeroize
+    # requirements do not apply to them.
+    _TRANSIENT_SUFFIXES = ("_new", "_we", "_vld", "_next")
     secret_regs = []
     for i, line in enumerate(text.splitlines(), start=1):
         if _SECRET_REG_RE.search(line):
             # Extract the register name
             m = re.search(r"reg\s*\[[^\]]+\]\s*(\w+)", line)
-            if m:
+            if m and not m.group(1).endswith(_TRANSIENT_SUFFIXES):
                 secret_regs.append((m.group(1), i))
     # For each secret register, check if it's ever zeroized
     for reg_name, decl_line in secret_regs:
@@ -671,6 +694,11 @@ def _scan_sec_reg_no_reset(file: Path, text: str) -> list[ScanHit]:
                 names = [n.strip() for n in m.group(1).split(",") if n.strip()]
                 for reg_name in names:
                     if not _is_security_name(reg_name):
+                        continue
+                    # Skip write-enable strobes and next-state helpers:
+                    # one-cycle transients, not flip-flop state, so
+                    # "no reset" does not apply to them.
+                    if reg_name.endswith(("_we", "_new", "_vld", "_next")):
                         continue
                     # A declaration initializer (`reg enable = 1'b0;`)
                     # defines the power-up value on FPGA targets, so the
@@ -868,7 +896,16 @@ _NBA_SIGNAL_RE = re.compile(r"^\s*(\w+)\s*<=\s*")
 
 def _scan_nba_race(file: Path, text: str) -> list[ScanHit]:
     """CWE-362: non-blocking assignment race — same signal assigned twice
-    without a branch separator. The last assignment silently overrides."""
+    without a branch separator. The last assignment silently overrides.
+
+    Precision note (audit 2026-08-07): the original rule produced ~445 hits
+    on verilog-ethernet, ~95% false positive. The dominant FP class was a
+    plain `if (...)` block between two NBAs — the two assignments are in
+    different branch contexts but the rule only recognized `else`/`endcase`
+    as separators. Fix: treat a new `if` statement at the same depth as a
+    context reset, since assignments before vs after an if-block are in
+    different execution paths.
+    """
     suffix = file.suffix.lower()
     if suffix in DOC_SUFFIXES:
         return []
@@ -881,6 +918,16 @@ def _scan_nba_race(file: Path, text: str) -> list[ScanHit]:
     in_always = False
     always_depth = 0
     last_nba = {}  # signal -> (line, code)
+
+    # Track the nesting depth at which each NBA was recorded, so a new
+    # top-level `if` correctly invalidates prior NBAs at the same depth.
+    NBA_SEP_RE = re.compile(
+        r"\b(else|elsif|endcase|end\s*case|when\s+others)\b",
+        re.IGNORECASE,
+    )
+    # A standalone `if` that OPENS a new block at the same level is a
+    # context boundary for assignments above it.
+    IF_OPEN_RE = re.compile(r"^\s*if\s*\(", re.IGNORECASE)
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -898,21 +945,23 @@ def _scan_nba_race(file: Path, text: str) -> list[ScanHit]:
             always_depth += stripped.count("begin") - stripped.count("end")
             always_depth += stripped.count("{") - stripped.count("}")
 
+            # If this line opens a new top-level conditional, any NBA from
+            # a prior if/else arm is no longer in the same context.
+            if IF_OPEN_RE.match(stripped) and "else" not in stripped.lower():
+                last_nba = {}
+
             m = _NBA_SIGNAL_RE.match(stripped)
             if m:
                 sig = m.group(1).split("[")[0]
                 if sig in last_nba:
                     prev_line, prev_code = last_nba[sig]
                     between = "\n".join(lines[prev_line:i - 1])
-                    if not re.search(
-                        r"\b(else|elsif|endcase|end\s*case|when\s+others)\b",
-                        between,
-                        re.IGNORECASE,
-                    ) and (i - prev_line) < 15:
+                    if not NBA_SEP_RE.search(between) and (i - prev_line) < 15:
                         hits.append(ScanHit(
                             file=file, line=i, snippet=stripped[:70],
                             rule_id="CWE362-nba-race",
                             taxonomy_class=TaxonomyClass.LOGIC_RESET_RACE,
+                            cwe_ids=["CWE-362"],
                             initial_signal=20,
                             note=f"Signal '{sig}' assigned via <= twice in same "
                             "always block without branch separator. The last "
