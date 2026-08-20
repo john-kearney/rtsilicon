@@ -3,9 +3,11 @@
 Check your hardware design for security issues. Plain English. No PhD required.
 
 ```bash
-pip install rtsilicon
-cd my_design
-rt-si check
+git clone https://github.com/john-kearney/rtsilicon.git
+cd rtsilicon
+make install
+source .venv/bin/activate
+rt-si check --target /path/to/your/design
 ```
 
 ## What it does
@@ -64,10 +66,14 @@ Full list: run `rt-si research` or read the [field guide](field-guide/).
 
 ## Install
 
+Not yet on PyPI. Install from source:
+
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/rt-si check --target .
+git clone https://github.com/john-kearney/rtsilicon.git
+cd rtsilicon
+make install            # creates .venv and installs
+source .venv/bin/activate
+rt-si check --target /path/to/your/design
 ```
 
 ## CI integration
@@ -75,7 +81,7 @@ python3 -m venv .venv
 ### GitHub Actions
 Add to `.github/workflows/security.yml`:
 ```yaml
-uses: john-kearney/rtsilicon@v1
+uses: john-kearney/rtsilicon@main
 with:
   target: ./src
 ```
@@ -84,7 +90,7 @@ with:
 Add to your `.pre-commit-config.yaml`:
 ```yaml
 - repo: https://github.com/john-kearney/rtsilicon
-  rev: v0.3
+  rev: main
   hooks:
     - id: rt-si-check
       args: ["--target", "src"]
@@ -101,7 +107,9 @@ The [field guide](field-guide/) explains each CWE class in plain language:
 
 ## Precision
 
-Measured against a labeled benchmark: **precision 92.3%, recall 100%**.
+This is a hint engine, not a formal prover. Every finding needs human review.
+Some rules are noisier than others — if you get false positives, file an issue
+with the code that tripped it. That's how the rules get better.
 
 ## Contributing
 
