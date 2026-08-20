@@ -624,50 +624,92 @@ def _scan_comparison_early_exit(file: Path, text: str) -> list[ScanHit]:
 # Detects registers with security-relevant names that lack a reset
 # assignment (no `if (!rst_n) reg <= ...` or `reg = ...` in reset block).
 
-_SEC_REG_NAMES = re.compile(
-    r"\breg\s*(?:\[[^\]]+\])?\s*"  # bit width is optional
-    r"\w*(lock|enable|priv|secure|protect|auth|debug_en|scan_en|lock_en|"
-    r"secure_en|debug_lock|protection)\w*",
+_SEC_NAME_KEYWORDS = {
+    "lock", "locked", "lockdown", "unlock", "enable", "priv", "secure",
+    "protect", "protected", "protection", "auth", "debug", "scan",
+    "manuf", "bist",
+}
+
+_SEC_REG_DECL_RE = re.compile(
+    r"\breg\b\s*(?:\[[^\]]*\]\s*)?([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)",
     re.IGNORECASE,
 )
 
+_BEGIN_WORD_RE = re.compile(r"\bbegin\b")
+_END_WORD_RE = re.compile(r"\bend\b")
+
+
+def _is_security_name(identifier: str) -> bool:
+    tokens = re.split(r"_+", identifier.lower())
+    return any(t in _SEC_NAME_KEYWORDS for t in tokens)
+
 
 def _scan_sec_reg_no_reset(file: Path, text: str) -> list[ScanHit]:
-    """CWE-1271: security register without explicit reset to safe value."""
+    """CWE-1271: security register without explicit reset to safe value.
+
+    Two precision guards (issue #2, false positives on secworks/aes):
+    1. Name matching is token-based, not substring. A 'reg' named
+       '*_block' or 'clock_*' is not a lock.
+    2. Only module-level declarations are considered. A 'reg' declared
+       inside a begin/end block is a procedural local (a combinational
+       variable in always @*, a named-block temp), not a flip-flop.
+       Module-level declarations never appear inside begin/end, so
+       tracking begin/end depth is sufficient context.
+    """
     hits: list[ScanHit] = []
     lines = text.splitlines()
+    begin_depth = 0
+
     for i, line in enumerate(lines, start=1):
-        m = _SEC_REG_NAMES.search(line)
-        if not m:
-            continue
-        # Extract register name (bit width is optional)
-        reg_match = re.search(r"reg\s*(?:\[[^\]]+\])?\s*(\w+)", line)
-        if not reg_match:
-            continue
-        reg_name = reg_match.group(1)
-        # Check if this register appears in any reset block
-        # (look for reg_name <= in proximity to rst/rst_n)
-        reset_pattern = re.compile(
-            rf"(!?rst_?n?|reset_?n?)\b[^;]{{0,200}}\b{re.escape(reg_name)}\b\s*<=",
-            re.IGNORECASE | re.DOTALL,
-        )
-        if not reset_pattern.search(text):
-            hits.append(
-                ScanHit(
-                    file=file,
-                    line=i,
-                    snippet=line.strip(),
-                    rule_id="CWE-1271-sec-reg-no-reset",
-                    taxonomy_class=TaxonomyClass.LOGIC_RESET_RACE,
-                    initial_signal=25,
-                    note=(
-                        f"Security-relevant register '{reg_name}' has no explicit "
-                        "reset assignment. It powers up undefined — if 'undefined' "
-                        "means 'protection disabled', the chip boots insecure. "
-                        "Reset to the most restrictive value (CWE-1271)."
-                    ),
-                )
-            )
+        # Strip line comments so 'begin' in a comment can not skew depth.
+        code = line.split("//", 1)[0]
+        stripped = code.strip()
+
+        if begin_depth == 0:
+            m = _SEC_REG_DECL_RE.search(stripped)
+            if m:
+                names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+                for reg_name in names:
+                    if not _is_security_name(reg_name):
+                        continue
+                    # A declaration initializer (`reg enable = 1'b0;`)
+                    # defines the power-up value on FPGA targets, so the
+                    # "powers up undefined" concern does not apply.
+                    if re.search(rf"\b{re.escape(reg_name)}\s*=", stripped):
+                        continue
+                    # Check if this register appears in any reset block
+                    # (look for reg_name <= in proximity to rst/rst_n).
+                    # Array indexing allowed between name and <=, so
+                    # `block_reg[i] <= 32'h0` counts as a reset.
+                    reset_pattern = re.compile(
+                        rf"(!?rst_?n?|reset_?n?)\b[^;]{{0,200}}\b{re.escape(reg_name)}"
+                        rf"(?:\s*\[[^\]]*\])?\s*<=",
+                        re.IGNORECASE | re.DOTALL,
+                    )
+                    if not reset_pattern.search(text):
+                        hits.append(
+                            ScanHit(
+                                file=file,
+                                line=i,
+                                snippet=stripped[:70],
+                                rule_id="CWE-1271-sec-reg-no-reset",
+                                taxonomy_class=TaxonomyClass.LOGIC_RESET_RACE,
+                                initial_signal=25,
+                                note=(
+                                    f"Security-relevant register '{reg_name}' has no explicit "
+                                    "reset assignment. It powers up undefined — if 'undefined' "
+                                    "means 'protection disabled', the chip boots insecure. "
+                                    "Reset to the most restrictive value (CWE-1271)."
+                                ),
+                            )
+                        )
+
+        # Update begin/end depth after processing the line.
+        begin_depth += len(_BEGIN_WORD_RE.findall(code))
+        begin_depth -= len(_END_WORD_RE.findall(code))
+        if begin_depth < 0:
+            begin_depth = 0
+
     return hits
 
 
