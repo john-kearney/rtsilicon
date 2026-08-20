@@ -934,7 +934,7 @@ def _scan_nba_race(file: Path, text: str) -> list[ScanHit]:
 # checking ready/busy status.
 
 _KEY_WE_RE = re.compile(
-    r"(key_we|key_wr|config_we|block_we)\s*[:=]\s*1'b1\s*;",
+    r"(key_we|key_wr|config_we)\s*[:=]\s*1'b1\s*;",
     re.IGNORECASE,
 )
 _READY_CHECK_RE = re.compile(r"ready|busy|idle|done", re.IGNORECASE)
@@ -1164,7 +1164,34 @@ def scan_file(file: Path) -> list[ScanHit]:
             hits.extend(rule(file, text))
         except Exception:  # noqa: BLE001 — scanner must never crash the run
             continue
-    return hits
+    return _filter_suppressed(text, hits)
+
+
+# ---------------------------------------------------------------------------
+# Suppression comments (issue #2, the contract/design-decision case).
+# Some findings are fine by contract between the core and its instance, or
+# by design decision only the designer can judge. These are suppressible:
+#   // rt-si: ignore        — suppress findings on this line (Verilog)
+#   -- rt-si: ignore        — same, VHDL comment syntax
+#   // rt-si: ignore-file   — suppress all findings in this file
+# ---------------------------------------------------------------------------
+
+_SUPPRESS_FILE_RE = re.compile(r"(?://|--)\s*rt-si:\s*ignore-file\b")
+_SUPPRESS_LINE_RE = re.compile(r"(?://|--)\s*rt-si:\s*ignore(?![\w-])")
+
+
+def _filter_suppressed(text: str, hits: list[ScanHit]) -> list[ScanHit]:
+    """Drop hits the author has explicitly suppressed with a comment."""
+    lines = text.splitlines()
+    if any(_SUPPRESS_FILE_RE.search(line) for line in lines):
+        return []
+    suppressed = {
+        i for i, line in enumerate(lines, start=1)
+        if _SUPPRESS_LINE_RE.search(line)
+    }
+    if not suppressed:
+        return hits
+    return [h for h in hits if h.line not in suppressed]
 
 
 def scan(root: Path) -> list[ScanHit]:
