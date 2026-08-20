@@ -2,12 +2,18 @@
 
 This is the proof that the scanner works. If we can't reproduce F1-F5 (the
 findings I made by hand on the same target), the tool is vapor.
+
+These tests need the local audit targets, which only exist on the
+machine the dataset was built on. They skip everywhere else (fresh
+clones, other machines) instead of failing.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+
+import pytest
 
 # Make the package importable without install.
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +26,10 @@ TARGET = Path("/Users/johnkearney/ZCodeProject/silicon-audit/targets/tt07-RO-bas
 
 # Antmicro FastVDMA — paying-customer demo target for the D-group rules.
 FASTVDMA = Path("/Users/johnkearney/ZCodeProject/silicon-audit/targets/fastvdma")
+
+pytestmark = pytest.mark.skipif(
+    not TARGET.exists(), reason=f"local audit target not present: {TARGET}"
+)
 
 
 def test_scanner_fires_on_target():
