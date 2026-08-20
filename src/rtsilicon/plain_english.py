@@ -302,7 +302,7 @@ def format_plain_report(findings: list[PlainFinding], target_name: str = "") -> 
             for word in words:
                 if len(fix_line) + len(word) > 75:
                     lines.append(fix_line)
-                    fix_line = "      " + word
+                    fix_line = "      " + word + " "
                 else:
                     fix_line += word + " "
             lines.append(fix_line.rstrip())

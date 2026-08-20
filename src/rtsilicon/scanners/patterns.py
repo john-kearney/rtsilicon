@@ -682,6 +682,12 @@ def _scan_sec_reg_no_reset(file: Path, text: str) -> list[ScanHit]:
     hits: list[ScanHit] = []
     lines = text.splitlines()
     begin_depth = 0
+    # Comment-stripped text for the reset search: the word 'reset' in a
+    # comment ("// no reset applied here") must not satisfy the reset
+    # check. Only real code counts.
+    code_text = re.sub(r"//[^\n]*", "", text)
+    code_text = re.sub(r"--[^\n]*", "", code_text)
+    code_text = re.sub(r"/\*.*?\*/", "", code_text, flags=re.DOTALL)
 
     for i, line in enumerate(lines, start=1):
         # Strip line comments so 'begin' in a comment can not skew depth.
@@ -714,7 +720,7 @@ def _scan_sec_reg_no_reset(file: Path, text: str) -> list[ScanHit]:
                         rf"(?:\s*\[[^\]]*\])?\s*<=",
                         re.IGNORECASE | re.DOTALL,
                     )
-                    if not reset_pattern.search(text):
+                    if not reset_pattern.search(code_text):
                         hits.append(
                             ScanHit(
                                 file=file,

@@ -149,3 +149,33 @@ def test_security_names_still_recognized():
         assert _is_security_name(n), f"'{n}' should match"
     for n in must_not:
         assert not _is_security_name(n), f"'{n}' should NOT match"
+
+
+def test_reset_word_in_comment_does_not_satisfy_check():
+    """The word 'reset' in a comment must not count as a reset path.
+    Found while building the suppression tests: a comment reading
+    'no reset here' silently satisfied the reset search."""
+    _d, f = _write("""\
+module m(input clk, input d);
+  reg lock_enable;  // no reset applied here
+  always @(posedge clk) lock_enable <= d;
+endmodule
+""")
+    hits = _scan_sec_reg_no_reset(f, f.read_text())
+    assert any("lock_enable" in h.snippet for h in hits), \
+        "comment mentioning reset wrongly suppressed the finding"
+
+
+def test_real_reset_in_code_still_suppresses():
+    """An actual reset assignment still satisfies the check."""
+    _d, f = _write("""\
+module m(input clk, input rst_n, input d);
+  reg lock_enable;
+  always @(posedge clk)
+    if (!rst_n) lock_enable <= 1'b0;
+    else lock_enable <= d;
+endmodule
+""")
+    hits = _scan_sec_reg_no_reset(f, f.read_text())
+    assert not any("lock_enable" in h.snippet for h in hits), \
+        "real reset no longer suppresses the finding"
