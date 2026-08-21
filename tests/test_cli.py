@@ -7,7 +7,9 @@ import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-RT_SI = [str(REPO / ".venv" / "bin" / "rt-si")]
+import shutil
+_rt_si = shutil.which("rt-si") or str(REPO / ".venv" / "bin" / "rt-si")
+RT_SI = [_rt_si]
 
 
 def run(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess:
