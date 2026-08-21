@@ -10,6 +10,18 @@ source .venv/bin/activate
 rt-si check --target /path/to/your/design
 ```
 
+## Suppressing findings
+
+Some findings are fine by contract between the core and its instance, or by design decision only you can judge. Silence them in source:
+
+```verilog
+reg key_reg;  // rt-si: ignore  by contract with the instancer
+```
+
+`// rt-si: ignore` suppresses the line, `-- rt-si: ignore` works in VHDL,
+and `// rt-si: ignore-file` silences the whole file. Everything else still
+scans.
+
 ## What it does
 
 Scans your Verilog, SystemVerilog, VHDL, and Chisel/Migen source for 25 MITRE CWE classes of hardware security defects. Tells you what's wrong, why it matters, and how to fix it — in plain English.

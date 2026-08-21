@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rtsilicon"
-version = "0.1.0"
+version = "0.2.0"
 description = "GLM-5.2 security-coding harness for open-source silicon red-teaming: scan RTL -> gated Finding -> advisory. The rt-for-silicon sibling of redthread."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,12 @@ dependencies = [
     "typer>=0.12.0",
     "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+# The AST precision layer (BUILD 6). Enables structurally-correct analysis
+# of Verilog/SystemVerilog via pyslang/slang. Falls back to regex-only if absent.
+# Install with: pip install rtsilicon[ast]
+ast = ["pyslang>=11.0.0"]
 
 [project.scripts]
 rt-si = "rtsilicon.cli:app"
