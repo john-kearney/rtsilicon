@@ -324,12 +324,7 @@ def demo(
     console.print("[bold cyan]rt-si demo[/bold cyan] — open-source silicon security scan")
     console.print("[dim]THE SCANNER IS A HINT, NOT A FINDING.[/dim]\n")
 
-    home = "/Users/johnkearney"
-    candidates = [
-        Path(home + "/ZCodeProject/silicon-audit/targets/tt07-RO-based-PUF"),
-        Path.cwd(),
-    ]
-    root = Path(target) if target else next((c for c in candidates if c.exists()), Path.cwd())
+    root = Path(target) if target else Path.cwd()
     console.print(f"[dim]target:[/dim] {str(root)}\n")
 
     hits = run_scan(root)

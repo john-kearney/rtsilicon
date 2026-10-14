@@ -3,13 +3,13 @@
 This is the proof that the scanner works. If we can't reproduce F1-F5 (the
 findings I made by hand on the same target), the tool is vapor.
 
-These tests need the local audit targets, which only exist on the
-machine the dataset was built on. They skip everywhere else (fresh
-clones, other machines) instead of failing.
+These tests need local audit targets. Point RTSI_AUDIT_TARGETS at a
+directory holding them; without it the tests skip instead of failing.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -21,11 +21,13 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rtsilicon.scanners import scan  # noqa: E402
 
-# TT07 RO-PUF target — cloned earlier in the session.
-TARGET = Path("/Users/johnkearney/ZCodeProject/silicon-audit/targets/tt07-RO-based-PUF")
+TARGETS = Path(os.environ.get("RTSI_AUDIT_TARGETS", "/nonexistent/rtsi-audit-targets"))
 
-# Antmicro FastVDMA — paying-customer demo target for the D-group rules.
-FASTVDMA = Path("/Users/johnkearney/ZCodeProject/silicon-audit/targets/fastvdma")
+# TT07 RO-PUF target.
+TARGET = TARGETS / "tt07-RO-based-PUF"
+
+# Antmicro FastVDMA — demo target for the D-group rules.
+FASTVDMA = TARGETS / "fastvdma"
 
 pytestmark = pytest.mark.skipif(
     not TARGET.exists(), reason=f"local audit target not present: {TARGET}"
@@ -84,14 +86,14 @@ def test_all_hits_are_candidates_not_findings():
 
 
 # ---------------------------------------------------------------------------
-# D-group tests — FastVDMA paying-customer demo
+# D-group tests — FastVDMA demo
 # ---------------------------------------------------------------------------
 
 
 def test_scanner_finds_dma_addr_from_csr():
     """D2 (HIGH): FastVDMA sinks an unchecked CSR-derived address onto the AXI bus.
 
-    The canonical paying-customer finding. The taint chain is:
+    The canonical FastVDMA finding. The taint chain is:
       io.ctl.startAddress  (AddressGenerator.scala:62)
         -> address_i -> io.xfer.address  (AddressGenerator.scala:45)
         -> araddr      (AXI4Reader.scala:52, araddr sourced from io.xfer.address)
@@ -123,7 +125,7 @@ def test_scanner_flags_no_range_guard_in_dma_file():
 def test_d_group_rules_do_not_crash_on_crypto_targets():
     """Regression: the new D-group regexes must not break scanning of the
     crypto cores (which have no DMA)."""
-    aes = Path("/Users/johnkearney/ZCodeProject/silicon-audit/targets/aes")
+    aes = TARGETS / "aes"
     if not aes.exists():
         return  # skip if aes wasn't cloned
     hits = scan(aes)
